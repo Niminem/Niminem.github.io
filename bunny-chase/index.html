@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Bunny Chase in Rainbow Land</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #ffd6f0;
+    font-family: "Chalkboard SE", "Comic Sans MS", "Marker Felt", sans-serif; }
+  canvas { display: block; touch-action: none; }
+  body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+  #joyBase, #joyKnob { position: fixed; border-radius: 50%; pointer-events: none; display: none;
+    transform: translate(-50%, -50%); }
+  #joyBase { width: 130px; height: 130px; background: rgba(255, 255, 255, .35); border: 4px solid rgba(255, 255, 255, .8);
+    box-shadow: 0 0 20px rgba(200, 100, 220, .4); }
+  #joyKnob { width: 62px; height: 62px; background: linear-gradient(135deg, #ff8fc0, #b48cff);
+    border: 4px solid #fff; box-shadow: 0 4px 10px rgba(150, 60, 180, .4); }
+  #jumpBtn { position: fixed; right: calc(24px + env(safe-area-inset-right)); bottom: calc(32px + env(safe-area-inset-bottom));
+    width: 96px; height: 96px; border-radius: 50%; border: 5px solid #fff; display: none;
+    background: linear-gradient(135deg, #ffd56b, #ff8fc0); color: #fff; font-size: 44px; line-height: 1;
+    box-shadow: 0 6px 0 #d4689f, 0 10px 20px rgba(180, 80, 160, .35); touch-action: none; }
+  #jumpBtn.down { transform: translateY(4px); box-shadow: 0 2px 0 #d4689f; }
+  body.touch.playing #jumpBtn { display: flex; align-items: center; justify-content: center; }
+  .touch-only { display: none; }
+  body.touch .touch-only { display: block; }
+  body.touch .mouse-only { display: none; }
+  @media (max-width: 600px) {
+    #start .card { padding: 24px 22px; margin: 0 16px; }
+    #start h1 { font-size: 38px; }
+    #start p { font-size: 19px; }
+    #message { font-size: 34px; padding: 0 12px; }
+    #score { font-size: 26px; top: calc(10px + env(safe-area-inset-top)); }
+  }
+  #score { position: fixed; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none;
+    font-size: 30px; color: #fff; text-shadow: 0 2px 0 #c45bb0, 0 0 12px rgba(160, 60, 200, .6); }
+  #message { position: fixed; top: 32%; left: 0; right: 0; text-align: center; pointer-events: none;
+    font-size: 54px; color: #fff; opacity: 0; transition: opacity .3s, transform .3s; transform: scale(.7);
+    text-shadow: 0 3px 0 #ff5fa2, 0 0 18px rgba(255, 120, 200, .9); }
+  #message.show { opacity: 1; transform: scale(1); }
+  #start { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 220, 245, .55); backdrop-filter: blur(3px); }
+  #start .card { background: #fff; border-radius: 28px; padding: 32px 44px; text-align: center; max-width: 520px;
+    box-shadow: 0 10px 0 #f3a6d6, 0 20px 40px rgba(180, 80, 160, .3); }
+  #start h1 { margin: 0 0 8px; font-size: 46px;
+    background: linear-gradient(90deg, #ff4d6d, #ff9f43, #f5c400, #3cc96b, #4dabff, #8a6bff);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #start p { font-size: 22px; color: #7a4a86; margin: 10px 0; }
+  #start button { margin-top: 16px; font: inherit; font-size: 30px; color: #fff; border: 0; cursor: pointer;
+    padding: 12px 46px; border-radius: 999px; background: linear-gradient(90deg, #ff6fa8, #b07bff);
+    box-shadow: 0 6px 0 #9a4fc9; }
+  #start button:active { transform: translateY(4px); box-shadow: 0 2px 0 #9a4fc9; }
+  .keys { font-size: 18px !important; color: #a07aa8 !important; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="score">🦄 0 &nbsp;&nbsp; 🐴 0</div>
+<div id="message"></div>
+<div id="start">
+  <div class="card">
+    <h1>Bunny Chase!</h1>
+    <p>You are the bunny 🐰</p>
+    <p>Chase the unicorn 🦄 and the horse 🐴 all around Rainbow Land!</p>
+    <p class="keys mouse-only">Arrow keys or W A S D to hop &nbsp;•&nbsp; Space to jump</p>
+    <p class="keys touch-only">Put your finger down and slide it to hop &nbsp;•&nbsp; Tap ⭐ to jump</p>
+    <button id="play">Play!</button>
+  </div>
+</div>
+<div id="joyBase"></div>
+<div id="joyKnob"></div>
+<button id="jumpBtn" aria-label="Jump">⭐</button>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- basic setup ----------
+const WORLD_RADIUS = 48;
+const BUNNY_SPEED = 9.5;
+const CATCH_DISTANCE = 1.9;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = makeSkyTexture();
+scene.fog = new THREE.Fog(0xffe6f4, 70, 180);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+const CAMERA_OFFSET = new THREE.Vector3(0, 8, -13);
+// Tall phone screens see less side-to-side, so pull the camera back and widen the view
+function fitCamera() {
+  const portrait = innerWidth / innerHeight < 1;
+  camera.fov = portrait ? 68 : 55;
+  CAMERA_OFFSET.set(0, portrait ? 11 : 8, portrait ? -15 : -13);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+fitCamera();
+camera.position.copy(CAMERA_OFFSET);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0xffb8e0, 1.3));
+const sun = new THREE.DirectionalLight(0xfff6e0, 2.0);
+sun.position.set(20, 40, -15);
+sun.castShadow = true;
+sun.shadow.mapSize.setScalar('ontouchstart' in window ? 1024 : 2048);
+Object.assign(sun.shadow.camera, { left: -55, right: 55, top: 55, bottom: -55, near: 1, far: 120 });
+scene.add(sun);
+
+const RAINBOW = [0xff4d6d, 0xff9f43, 0xffe066, 0x6bdc7a, 0x4dabff, 0x7d6bff, 0xc77dff];
+const PASTELS = [0xffb3c7, 0xffd3a8, 0xfff3a8, 0xc4f5b0, 0xb3e3ff, 0xd4c4ff, 0xf7c4ff];
+
+const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.65, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+// ---------- textures ----------
+function makeSkyTexture() {
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 512;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, '#8fd3ff');
+  g.addColorStop(0.55, '#ffd6f0');
+  g.addColorStop(1, '#fff4c2');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 4, 512);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function makeRingTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const ctx = c.getContext('2d');
+  const cols = ['#ffb3c7', '#ffd3a8', '#fff3a8', '#c4f5b0', '#b3e3ff', '#d4c4ff'];
+  const rings = 18;
+  for (let i = 0; i < rings; i++) {
+    ctx.fillStyle = cols[i % cols.length];
+    ctx.beginPath();
+    ctx.arc(512, 512, 512 * (1 - i / rings), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+// ---------- rainbow land ----------
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(WORLD_RADIUS + 2, 128),
+  new THREE.MeshStandardMaterial({ map: makeRingTexture(), roughness: 0.9 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const outerGround = new THREE.Mesh(new THREE.CircleGeometry(320, 64), mat(0xc9f7d9, { roughness: 1 }));
+outerGround.rotation.x = -Math.PI / 2;
+outerGround.position.y = -0.03;
+scene.add(outerGround);
+
+// Big rainbows all around the edge of the world
+function makeRainbow(radius) {
+  const g = new THREE.Group();
+  RAINBOW.forEach((c, i) => {
+    g.add(new THREE.Mesh(
+      new THREE.TorusGeometry(radius - i * 1.7, 0.85, 12, 96, Math.PI),
+      new THREE.MeshBasicMaterial({ color: c, fog: false, transparent: true, opacity: 0.85 })
+    ));
+  });
+  return g;
+}
+[[0, 95, 0], [95, 0, Math.PI / 2], [-95, 0, -Math.PI / 2], [0, -95, Math.PI]].forEach(([x, z, rot]) => {
+  const r = makeRainbow(46);
+  r.position.set(x, -3, z);
+  r.rotation.y = rot;
+  scene.add(r);
+});
+
+// Gumdrop fence around the edge
+{
+  const geo = new THREE.SphereGeometry(0.8, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  const mats = RAINBOW.map(c => mat(c, { roughness: 0.3 }));
+  const count = 80;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const m = mesh(geo, mats[i % mats.length], Math.cos(a) * (WORLD_RADIUS + 0.6), 0, Math.sin(a) * (WORLD_RADIUS + 0.6));
+    m.scale.y = 1.2;
+    scene.add(m);
+  }
+}
+
+// Lollipop trees (things to run around)
+const trees = [];
+{
+  const trunkGeo = new THREE.CylinderGeometry(0.22, 0.28, 4, 10);
+  const topGeo = new THREE.SphereGeometry(1.5, 24, 16);
+  const swirlGeo = new THREE.TorusGeometry(1.0, 0.12, 8, 32);
+  const trunkMat = mat(0xffffff);
+  const keepClear = [[0, 0], [8, 14], [-10, 12]];
+  let tries = 0;
+  while (trees.length < 22 && tries++ < 2000) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 6 + Math.random() * (WORLD_RADIUS - 10);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (keepClear.some(([cx, cz]) => Math.hypot(x - cx, z - cz) < 6)) continue;
+    if (trees.some(t => Math.hypot(x - t.x, z - t.z) < 6)) continue;
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.add(mesh(trunkGeo, trunkMat, 0, 2, 0));
+    const color = PASTELS[trees.length % PASTELS.length];
+    const top = mesh(topGeo, mat(color, { roughness: 0.25 }), 0, 5.2, 0);
+    top.scale.z = 0.55;
+    g.add(top);
+    const swirl = mesh(swirlGeo, mat(0xffffff, { roughness: 0.3 }), 0, 5.2, 0.8);
+    swirl.scale.setScalar(0.9);
+    g.add(swirl);
+    g.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(g);
+    trees.push({ x, z, r: 0.5 });
+  }
+}
+
+// Flowers
+{
+  const stemGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.6, 5);
+  const headGeo = new THREE.SphereGeometry(0.2, 10, 8);
+  const centerGeo = new THREE.SphereGeometry(0.1, 8, 6);
+  const stemMat = mat(0x5ccf6e);
+  const centerMat = mat(0xfff06a);
+  const headMats = RAINBOW.map(c => mat(c));
+  for (let i = 0; i < 110; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 3 + Math.sqrt(Math.random()) * (WORLD_RADIUS - 4);
+    const g = new THREE.Group();
+    g.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    g.add(new THREE.Mesh(stemGeo, stemMat).translateY(0.3));
+    const head = new THREE.Mesh(headGeo, headMats[i % headMats.length]);
+    head.position.y = 0.65; head.scale.y = 0.5;
+    g.add(head);
+    g.add(new THREE.Mesh(centerGeo, centerMat).translateY(0.75));
+    scene.add(g);
+  }
+}
+
+// Fluffy clouds
+const clouds = [];
+{
+  const geo = new THREE.SphereGeometry(1, 16, 12);
+  const cloudMat = mat(0xffffff, { emissive: 0xfff0fa, emissiveIntensity: 0.35, roughness: 1 });
+  for (let i = 0; i < 12; i++) {
+    const g = new THREE.Group();
+    for (let j = 0; j < 5; j++) {
+      const m = new THREE.Mesh(geo, cloudMat);
+      m.position.set((j - 2) * 1.6, Math.random() * 0.8, Math.random() * 1.2);
+      m.scale.setScalar(1.4 + Math.random() * 1.2);
+      g.add(m);
+    }
+    const a = Math.random() * Math.PI * 2, r = 15 + Math.random() * 60;
+    g.position.set(Math.cos(a) * r, 20 + Math.random() * 10, Math.sin(a) * r);
+    g.userData.speed = 0.5 + Math.random() * 0.8;
+    scene.add(g);
+    clouds.push(g);
+  }
+}
+
+// Floating rainbow sparkles in the air
+const airSparkles = (() => {
+  const n = 350;
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * WORLD_RADIUS;
+    pos.set([Math.cos(a) * r, 0.5 + Math.random() * 12, Math.sin(a) * r], i * 3);
+    c.setHex(RAINBOW[i % RAINBOW.length]);
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.25, vertexColors: true, transparent: true, opacity: 0.85 }));
+  scene.add(pts);
+  return pts;
+})();
+
+// ---------- the bunny (that's you!) ----------
+function makeBunny() {
+  const g = new THREE.Group();
+  const fur = mat(0x9b9ba6), furLight = mat(0xd6d6de), pink = mat(0xff9ec4);
+  const black = mat(0x222222, { roughness: 0.2 }), white = mat(0xffffff);
+
+  const body = mesh(new THREE.SphereGeometry(0.7, 24, 16), fur, 0, 0.75, 0);
+  body.scale.set(1, 0.95, 1.15);
+  const belly = mesh(new THREE.SphereGeometry(0.5, 20, 14), furLight, 0, 0.7, 0.4);
+  belly.scale.set(1, 1, 0.8);
+  const head = mesh(new THREE.SphereGeometry(0.52, 24, 16), fur, 0, 1.5, 0.55);
+  g.add(body, belly, head);
+
+  const ears = [];
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Group();
+    const outer = mesh(new THREE.CapsuleGeometry(0.14, 0.75, 6, 12), fur, 0, 0.5, 0);
+    outer.scale.z = 0.55;
+    const inner = mesh(new THREE.CapsuleGeometry(0.08, 0.6, 6, 12), pink, 0, 0.5, 0.05);
+    inner.scale.z = 0.4;
+    ear.add(outer, inner);
+    ear.position.set(side * 0.2, 1.88, 0.45);
+    ear.rotation.z = -side * 0.2;
+    ear.rotation.x = -0.15;
+    g.add(ear);
+    ears.push(ear);
+
+    g.add(mesh(new THREE.SphereGeometry(0.08, 12, 10), black, side * 0.2, 1.6, 0.98));
+    g.add(mesh(new THREE.SphereGeometry(0.03, 8, 6), white, side * 0.22, 1.64, 1.05));
+    const cheek = mesh(new THREE.SphereGeometry(0.1, 10, 8), pink, side * 0.32, 1.42, 0.95);
+    cheek.scale.z = 0.4;
+    g.add(cheek);
+    const foot = mesh(new THREE.SphereGeometry(1, 12, 10), furLight, side * 0.35, 0.12, 0.35);
+    foot.scale.set(0.22, 0.13, 0.38);
+    g.add(foot);
+  }
+  g.add(mesh(new THREE.SphereGeometry(0.07, 10, 8), pink, 0, 1.45, 1.06));
+  g.add(mesh(new THREE.SphereGeometry(0.27, 14, 12), white, 0, 0.85, -0.82));
+  g.userData.ears = ears;
+  return g;
+}
+
+// ---------- horse & unicorn ----------
+function makeHorse({ body, mane, hoof, horn }) {
+  const g = new THREE.Group();
+  const bodyMat = mat(body);
+  const hoofMat = mat(hoof);
+  const maneMats = mane.map(c => mat(c, { roughness: 0.4 }));
+
+  const torso = mesh(new THREE.CapsuleGeometry(0.55, 1.3, 8, 16), bodyMat, 0, 1.55, 0);
+  torso.rotation.x = Math.PI / 2;
+  g.add(torso);
+
+  const legs = [];
+  for (const [x, z] of [[0.3, 0.75], [-0.3, 0.75], [0.3, -0.75], [-0.3, -0.75]]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, 1.3, z);
+    pivot.add(mesh(new THREE.CylinderGeometry(0.13, 0.1, 1.2, 10), bodyMat, 0, -0.6, 0));
+    pivot.add(mesh(new THREE.CylinderGeometry(0.13, 0.14, 0.16, 10), hoofMat, 0, -1.2, 0));
+    g.add(pivot);
+    legs.push(pivot);
+  }
+
+  // neck
+  const neckTilt = 0.5;
+  const neck = new THREE.Group();
+  neck.position.set(0, 1.85, 0.85);
+  neck.rotation.x = neckTilt;
+  neck.add(mesh(new THREE.CylinderGeometry(0.26, 0.36, 1.25, 12), bodyMat, 0, 0.6, 0));
+  g.add(neck);
+
+  // head
+  const head = mesh(new THREE.BoxGeometry(0.44, 0.44, 0.85), bodyMat, 0, 2.85, 1.7);
+  head.rotation.x = 0.5;
+  g.add(head);
+  const muzzle = mesh(new THREE.SphereGeometry(0.26, 14, 12), bodyMat, 0, 2.63, 2.0);
+  muzzle.scale.set(0.95, 0.85, 1);
+  g.add(muzzle);
+  const eyeMat = mat(0x1a1a1a, { roughness: 0.2 });
+  const shineMat = mat(0xffffff);
+  for (const side of [-1, 1]) {
+    g.add(mesh(new THREE.SphereGeometry(0.07, 10, 8), eyeMat, side * 0.23, 2.98, 1.66));
+    g.add(mesh(new THREE.SphereGeometry(0.025, 6, 6), shineMat, side * 0.27, 3.01, 1.69));
+    const ear = mesh(new THREE.ConeGeometry(0.08, 0.26, 8), bodyMat, side * 0.14, 3.2, 1.42);
+    ear.rotation.z = -side * 0.2;
+    g.add(ear);
+    g.add(mesh(new THREE.SphereGeometry(0.035, 6, 6), mat(0x3a2a2a), side * 0.09, 2.6, 2.24));
+  }
+
+  // mane along the back of the neck
+  const dir = new THREE.Vector3(0, Math.cos(neckTilt), Math.sin(neckTilt));
+  const back = new THREE.Vector3(0, Math.sin(neckTilt), -Math.cos(neckTilt));
+  const n = 8;
+  for (let i = 0; i < n; i++) {
+    const t = 0.05 + (i / (n - 1)) * 1.2;
+    const p = new THREE.Vector3(0, 1.85, 0.85).addScaledVector(dir, t).addScaledVector(back, 0.26);
+    const tuft = mesh(new THREE.SphereGeometry(0.17, 12, 10), maneMats[i % maneMats.length], p.x, p.y, p.z);
+    tuft.scale.set(0.8, 1.1, 1);
+    g.add(tuft);
+  }
+  g.add(mesh(new THREE.SphereGeometry(0.14, 10, 8), maneMats[maneMats.length - 1], 0, 3.17, 1.62));
+
+  // tail
+  const tail = new THREE.Group();
+  tail.position.set(0, 1.75, -1.15);
+  tail.rotation.x = 0.5;
+  const strands = Math.max(3, mane.length);
+  for (let i = 0; i < strands; i++) {
+    const s = new THREE.Group();
+    s.rotation.z = (i / (strands - 1) - 0.5) * 0.5;
+    s.add(mesh(new THREE.CylinderGeometry(0.1, 0.04, 1.2, 8), maneMats[i % maneMats.length], 0, -0.6, 0));
+    tail.add(s);
+  }
+  g.add(tail);
+
+  if (horn) {
+    const hornMesh = mesh(new THREE.ConeGeometry(0.08, 0.7, 16), mat(0xffe17a, { emissive: 0x7a5a00, emissiveIntensity: 0.6, roughness: 0.2, metalness: 0.3 }), 0, 3.38, 1.9);
+    hornMesh.rotation.x = 0.6;
+    g.add(hornMesh);
+  }
+
+  g.userData.legs = legs;
+  g.userData.tail = tail;
+  return g;
+}
+
+// ---------- particles (sparkles!) ----------
+const particles = [];
+const sparkleGeo = new THREE.OctahedronGeometry(0.18);
+function spawnSparkle(pos, vel, color, life, gravity) {
+  const m = new THREE.Mesh(sparkleGeo, new THREE.MeshBasicMaterial({ color, transparent: true }));
+  m.position.copy(pos);
+  scene.add(m);
+  particles.push({ m, vel, life, maxLife: life, gravity });
+}
+function burst(pos) {
+  for (let i = 0; i < 60; i++) {
+    const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.4, Math.random() - 0.5).normalize().multiplyScalar(4 + Math.random() * 6);
+    spawnSparkle(pos.clone().setY(2), v, RAINBOW[i % RAINBOW.length], 1.4, 10);
+  }
+}
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      scene.remove(p.m);
+      p.m.material.dispose();
+      particles.splice(i, 1);
+      continue;
+    }
+    p.vel.y -= p.gravity * dt;
+    p.m.position.addScaledVector(p.vel, dt);
+    p.m.rotation.x += dt * 5;
+    p.m.rotation.y += dt * 4;
+    const k = p.life / p.maxLife;
+    p.m.scale.setScalar(k);
+    p.m.material.opacity = Math.min(1, k * 2);
+  }
+}
+
+// ---------- helpers ----------
+function lerpAngle(a, b, t) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+function collide(pos, radius) {
+  for (const t of trees) {
+    const dx = pos.x - t.x, dz = pos.z - t.z;
+    const d = Math.hypot(dx, dz), min = t.r + radius;
+    if (d < min && d > 1e-4) {
+      pos.x = t.x + (dx / d) * min;
+      pos.z = t.z + (dz / d) * min;
+    }
+  }
+  const r = Math.hypot(pos.x, pos.z), max = WORLD_RADIUS - radius;
+  if (r > max) { pos.x *= max / r; pos.z *= max / r; }
+}
+function randomPoint() {
+  const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (WORLD_RADIUS - 8);
+  return new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+}
+
+// ---------- creating the characters ----------
+const bunny = {
+  group: new THREE.Group(),
+  model: makeBunny(),
+  vel: new THREE.Vector3(),
+  hop: 0,
+  jumpY: 0,
+  jumpV: 0,
+};
+bunny.group.add(bunny.model);
+scene.add(bunny.group);
+
+class Runner {
+  constructor(name, emoji, model, speed, start, sparkly) {
+    this.name = name;
+    this.emoji = emoji;
+    this.model = model;
+    this.group = new THREE.Group();
+    this.group.add(model);
+    this.group.position.copy(start);
+    this.pos = this.group.position;
+    this.vel = new THREE.Vector3();
+    this.speed = speed;
+    this.wanderTarget = randomPoint();
+    this.cooldown = 0;
+    this.phase = 0;
+    this.zig = Math.random() * 10;
+    this.sparkly = sparkly;
+    this.sparkleTimer = 0;
+    this.caught = 0;
+    scene.add(this.group);
+  }
+
+  update(dt, t, bunnyPos) {
+    const away = this.pos.clone().sub(bunnyPos).setY(0);
+    const dist = away.length();
+    const desired = new THREE.Vector3();
+    let speed;
+
+    if (dist < 16 || this.cooldown > 0) {
+      // Run away from the bunny, wiggling side to side
+      away.normalize();
+      const side = new THREE.Vector3(-away.z, 0, away.x).multiplyScalar(Math.sin(t * 2 + this.zig) * 0.5);
+      desired.copy(away).add(side);
+      // Near the edge? Turn and run along it
+      const r = Math.hypot(this.pos.x, this.pos.z);
+      if (r > WORLD_RADIUS - 10) {
+        const inward = new THREE.Vector3(-this.pos.x, 0, -this.pos.z).normalize();
+        const tangent = new THREE.Vector3(-inward.z, 0, inward.x);
+        if (tangent.dot(away) < 0) tangent.negate();
+        const k = Math.min(1, ((r - (WORLD_RADIUS - 10)) / 10) * 1.3);
+        desired.normalize().lerp(tangent.addScaledVector(inward, 0.3), k);
+      }
+      speed = this.speed * (this.cooldown > 0 ? 1.35 : 1);
+    } else {
+      // Just wandering around
+      const toTarget = this.wanderTarget.clone().sub(this.pos).setY(0);
+      if (toTarget.length() < 2) this.wanderTarget = randomPoint();
+      desired.copy(toTarget);
+      speed = this.speed * 0.35;
+    }
+    desired.normalize();
+
+    // Steer around trees
+    for (const tr of trees) {
+      const dx = this.pos.x - tr.x, dz = this.pos.z - tr.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 3) desired.add(new THREE.Vector3(dx / d, 0, dz / d).multiplyScalar((3 - d) * 0.8));
+    }
+    desired.normalize().multiplyScalar(speed);
+
+    this.vel.lerp(desired, Math.min(1, dt * 4));
+    this.pos.addScaledVector(this.vel, dt);
+    collide(this.pos, 0.9);
+    this.cooldown = Math.max(0, this.cooldown - dt);
+
+    // Face where we're going
+    const s = this.vel.length();
+    if (s > 0.2) this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(this.vel.x, this.vel.z), Math.min(1, dt * 8));
+
+    // Gallop!
+    const amount = Math.min(1, s / 3);
+    this.phase += dt * (2 + s * 1.5);
+    const swing = Math.sin(this.phase) * 0.7 * amount;
+    const [fl, fr, bl, br] = this.model.userData.legs;
+    fl.rotation.x = swing; br.rotation.x = swing;
+    fr.rotation.x = -swing; bl.rotation.x = -swing;
+    this.model.position.y = Math.abs(Math.sin(this.phase)) * 0.18 * amount;
+    this.model.userData.tail.rotation.z = Math.sin(t * 6 + this.zig) * 0.25;
+
+    // Unicorn leaves a rainbow sparkle trail
+    if (this.sparkly) {
+      this.sparkleTimer -= dt;
+      if (this.sparkleTimer <= 0) {
+        this.sparkleTimer = s > 3 ? 0.03 : 0.15;
+        const p = this.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 1 + Math.random() * 2, (Math.random() - 0.5) * 1.2));
+        spawnSparkle(p, new THREE.Vector3(0, 0.6, 0), RAINBOW[Math.floor(Math.random() * RAINBOW.length)], 0.9, -0.5);
+      }
+    }
+  }
+}
+
+const unicorn = new Runner('Unicorn', '🦄',
+  makeHorse({ body: 0xf6f6fd, mane: RAINBOW, hoof: 0xd2b0ff, horn: true }),
+  7.6, new THREE.Vector3(8, 0, 14), true);
+const horse = new Runner('Horse', '🐴',
+  makeHorse({ body: 0x8b5a2b, mane: [0x3b2414, 0x4a2e19], hoof: 0x2a1a0e, horn: false }),
+  6.8, new THREE.Vector3(-10, 0, 12), false);
+const runners = [unicorn, horse];
+
+// ---------- input ----------
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  if (!started && (e.code === 'Enter' || e.code === 'Space')) startGame();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ---------- touch controls (phone) ----------
+// Put a finger down anywhere and slide it: a joystick appears under your finger.
+const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+if (isTouch) document.body.classList.add('touch');
+const JOY_RADIUS = 55;
+const joy = { id: null, sx: 0, sy: 0, x: 0, y: 0 };
+const joyBase = document.getElementById('joyBase');
+const joyKnob = document.getElementById('joyKnob');
+const jumpBtn = document.getElementById('jumpBtn');
+let jumpPressed = false;
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!started || joy.id !== null) return;
+  joy.id = e.pointerId;
+  joy.sx = joy.x = e.clientX;
+  joy.sy = joy.y = e.clientY;
+  joyBase.style.display = joyKnob.style.display = 'block';
+  joyBase.style.left = joyKnob.style.left = `${e.clientX}px`;
+  joyBase.style.top = joyKnob.style.top = `${e.clientY}px`;
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch { /* keep going without capture */ }
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (e.pointerId !== joy.id) return;
+  let dx = e.clientX - joy.sx, dy = e.clientY - joy.sy;
+  const d = Math.hypot(dx, dy);
+  if (d > JOY_RADIUS) { dx *= JOY_RADIUS / d; dy *= JOY_RADIUS / d; }
+  joy.x = joy.sx + dx;
+  joy.y = joy.sy + dy;
+  joyKnob.style.left = `${joy.x}px`;
+  joyKnob.style.top = `${joy.y}px`;
+});
+function endJoy(e) {
+  if (e.pointerId !== joy.id) return;
+  joy.id = null;
+  joyBase.style.display = joyKnob.style.display = 'none';
+}
+renderer.domElement.addEventListener('pointerup', endJoy);
+renderer.domElement.addEventListener('pointercancel', endJoy);
+
+jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); jumpPressed = true; jumpBtn.classList.add('down'); });
+['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+  jumpBtn.addEventListener(ev, () => { jumpPressed = false; jumpBtn.classList.remove('down'); }));
+// Stop the phone from scrolling, zooming or showing menus while playing
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// Returns how much the joystick is pushed: x = right, y = forward (each -1..1)
+function joystickInput() {
+  if (joy.id === null) return null;
+  const dx = (joy.x - joy.sx) / JOY_RADIUS, dy = (joy.y - joy.sy) / JOY_RADIUS;
+  if (Math.hypot(dx, dy) < 0.15) return { x: 0, y: 0 };
+  return { x: dx, y: -dy };
+}
+
+// ---------- sound ----------
+let audio = null;
+function chime() {
+  if (!audio) return;
+  const now = audio.currentTime;
+  [523, 659, 784, 1047, 1319].forEach((f, i) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = 'triangle';
+    o.frequency.value = f;
+    const at = now + i * 0.08;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.22, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
+    o.connect(g).connect(audio.destination);
+    o.start(at);
+    o.stop(at + 0.5);
+  });
+}
+function boing() {
+  if (!audio) return;
+  const now = audio.currentTime;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(220, now);
+  o.frequency.exponentialRampToValueAtTime(660, now + 0.18);
+  g.gain.setValueAtTime(0.15, now);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+  o.connect(g).connect(audio.destination);
+  o.start(now);
+  o.stop(now + 0.3);
+}
+
+// ---------- game flow ----------
+let started = false;
+const startEl = document.getElementById('start');
+const scoreEl = document.getElementById('score');
+const messageEl = document.getElementById('message');
+let messageTimer = null;
+
+function startGame() {
+  if (started) return;
+  started = true;
+  startEl.style.display = 'none';
+  document.body.classList.add('playing');
+  try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { audio = null; }
+}
+document.getElementById('play').addEventListener('click', startGame);
+
+function showMessage(text) {
+  messageEl.textContent = text;
+  messageEl.classList.add('show');
+  clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => messageEl.classList.remove('show'), 2000);
+}
+function updateScore() {
+  scoreEl.innerHTML = `🦄 ${unicorn.caught} &nbsp;&nbsp; 🐴 ${horse.caught}`;
+}
+
+// What happens when you catch one (just a placeholder for now — we'll decide the real thing next!)
+function onCatch(runner) {
+  runner.caught++;
+  runner.cooldown = 2.5;
+  updateScore();
+  burst(runner.pos);
+  chime();
+  showMessage(`You caught the ${runner.name}! ${runner.emoji}✨`);
+}
+
+function updateBunny(dt) {
+  let forward = (keys.ArrowUp || keys.KeyW ? 1 : 0) - (keys.ArrowDown || keys.KeyS ? 1 : 0);
+  let right = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+  const stick = joystickInput();
+  if (stick) { forward = stick.y; right = stick.x; }
+  const dir = started ? new THREE.Vector3(-right, 0, forward) : new THREE.Vector3();
+  if (dir.lengthSq() > 1) dir.normalize();
+
+  bunny.vel.lerp(dir.multiplyScalar(BUNNY_SPEED), Math.min(1, dt * 8));
+  bunny.group.position.addScaledVector(bunny.vel, dt);
+  collide(bunny.group.position, 0.7);
+
+  const s = bunny.vel.length();
+  if (s > 0.3) bunny.group.rotation.y = lerpAngle(bunny.group.rotation.y, Math.atan2(bunny.vel.x, bunny.vel.z), Math.min(1, dt * 12));
+
+  // Hop hop hop
+  let hopY;
+  if (s > 1) {
+    bunny.hop += dt * 11;
+    hopY = Math.abs(Math.sin(bunny.hop)) * 0.6;
+  } else {
+    bunny.hop = 0;
+    hopY = bunny.model.position.y * 0.8 - bunny.jumpY * 0.8;
+    if (hopY < 0.01) hopY = 0;
+  }
+
+  // Big jump with Space
+  const onGround = bunny.jumpY <= 0;
+  if (started && (keys.Space || jumpPressed) && onGround) { bunny.jumpV = 10; boing(); }
+  bunny.jumpV -= 28 * dt;
+  bunny.jumpY = Math.max(0, bunny.jumpY + bunny.jumpV * dt);
+  if (bunny.jumpY === 0 && bunny.jumpV < 0) bunny.jumpV = 0;
+
+  bunny.model.position.y = hopY + bunny.jumpY;
+  const earFlop = s > 1 ? Math.sin(bunny.hop * 2) * 0.2 : 0;
+  bunny.model.userData.ears.forEach(e => { e.rotation.x = -0.15 - earFlop - Math.min(0.5, bunny.jumpV * 0.04); });
+}
+
+// ---------- main loop ----------
+const clock = new THREE.Clock();
+const camTarget = new THREE.Vector3();
+
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  updateBunny(dt);
+  for (const r of runners) {
+    r.update(dt, t, bunny.group.position);
+    if (started && r.cooldown === 0 && r.pos.distanceTo(bunny.group.position) < CATCH_DISTANCE) onCatch(r);
+  }
+  updateParticles(dt);
+
+  for (const c of clouds) {
+    c.position.x += c.userData.speed * dt;
+    if (c.position.x > 90) c.position.x = -90;
+  }
+  airSparkles.rotation.y += dt * 0.02;
+  airSparkles.position.y = Math.sin(t * 0.6) * 0.4;
+
+  // Camera follows the bunny
+  camTarget.copy(bunny.group.position).add(CAMERA_OFFSET);
+  camera.position.lerp(camTarget, Math.min(1, dt * 4));
+  camera.lookAt(bunny.group.position.x, bunny.group.position.y + 1.2, bunny.group.position.z + 2);
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+addEventListener('resize', () => {
+  fitCamera();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
